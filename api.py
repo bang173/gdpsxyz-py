@@ -56,7 +56,8 @@ def _raise_for_errors(r, exc_of = ()):
 # for functions and methods that require authorization
 def _auth_required(req):
     def auth_check(*args, **kwds):
-        assert isinstance(_authorization, Session), 'you have not initialized your session.'
+        if not isinstance(_authorization, Session):
+            raise errors.NotInitialized('you have not initialized your session.')
         return req(*args, **kwds)
     return auth_check
 
