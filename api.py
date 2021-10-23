@@ -30,6 +30,7 @@ from .xyz import (
     GDPSImages,
     SessionIPs,
     Vote,
+    VoteType,
     Voteable,
     Updateable
 )
@@ -127,7 +128,7 @@ Supports :class:`gdpsxyz.Object` operand types
             if r.status_code == 401:
                 raise errors.InvalidToken(r, 'invalid session token.')
             if r.status_code == 404:
-                raise errors.NotFound(r, 'session was closed or not found.')
+                return None
         session_info = r.json().get('data')
         return SessionInfo(session_info)
 
@@ -147,7 +148,9 @@ Supports :class:`gdpsxyz.Object` operand types
             headers = headers
         )
         if r.status_code >= 400:
-            _raise_for_errors(r)
+            if r.status_code == 404:
+                return list()
+            _raise_for_errors(r, exc_of=(404,))
         session_infos = r.json().get('data')
         return [SessionInfo(s) for s in session_infos]
 
@@ -159,20 +162,23 @@ Supports :class:`gdpsxyz.Object` operand types
         headers = {
             'content-type': 'application/json'
         }
-        r = requests.get(
+        r = requests.post(
             url = 'https://gdps.xyz/api/session/reauthorize/',
             data = body,
             headers = headers
         )
+        if r.status_code >= 400:
+            _raise_for_errors(r, exc_of = (401, 404))
+            if r.status_code == 401:
+                raise errors.InvalidToken(r, 'Can not refresh session. Invalid refresh token.')
+            if r.status_code == 404:
+                raise errors.NotFound('session was closed or not found.')
         session = r.json().get('data')
         if session:
             self.token = session.get('token')
+            print(self.token)
             if _authorization:
                 self.init()
-        elif r.status_code >= 400:
-            _raise_for_errors(r, exc_of = (401,))
-            if r.status_code == 401:
-                raise errors.InvalidToken(r, 'Can not refresh session. Invalid refresh token.')
 
     def close(self):
         """Close session and delete its data"""
@@ -185,9 +191,11 @@ Supports :class:`gdpsxyz.Object` operand types
             headers = headers
         )
         if r.status_code >= 400:
-            _raise_for_errors(r, exc_of = (401, ))
+            _raise_for_errors(r, exc_of = (401, 404))
             if r.status_code == 401:
                 raise errors.InvalidToken(r, 'invalid session token.')
+            if r.status_code == 404:
+                raise errors.NotFound('session was closed or not found.')
 
     def init(self):
         """Initialize opened session to work with functions and methods that require authorization"""
@@ -320,7 +328,9 @@ Gives you a list of your GDPSs
             headers = headers
         )
         if r.status_code >= 400:
-            _raise_for_errors(r)
+            if r.status_code == 404:
+                return list()
+            _raise_for_errors(r, exc_of=(404,))
         gdps_pagination = r.json().get('data')
         return [GDPS(g) for g in gdps_pagination]
 
@@ -485,19 +495,21 @@ Vote on comment
         assert isinstance(vote_type, int), 'vote type must be an integer.'
         assert vote_type, 'vote type must be like or dislike (1 or 2).'
         param = {
-            'type': vote_type
+            'type': vote_type.value if isinstance(vote_type, VoteType) else vote_type
         }
         headers = {
             'content-type': 'application/json',
             'authorization': f'Bearer {_authorization.token}'
         }
+        url = f'https://gdps.xyz/api/gdps/{self.gdps_id}/comment/{self.id}/vote/'
         r = requests.post(
-            url = f'https://gdps.xyz/api/gdps/{self.gdps_id}/comment/{self.id}/vote/',
+            url = url,
             headers = headers,
             params = param
         )
         if r.status_code >= 400:
             _raise_for_errors(r)
+
 
     @_auth_required
     def unvote(self):
@@ -595,12 +607,12 @@ Supports :class:`gdpsxyz.Object` operand types
         assert isinstance(comment_id, int), 'comment id must be an integer.'
         assert comment_id, 'comment id must be positive.'
         r = requests.get(f'https://gdps.xyz/api/gdps/{self.id}/comment/{comment_id}/')
-        if r.status_code == 500:
-            raise errors.InternalServerError(r, 'a server side error has occured. Contact developers for help.')
+        if r.status_code >= 400:
+            if r.status_code == 404:
+                return None
+            _raise_for_errors(r, exc_of=(404,))
         comment = r.json().get('data')
-        if isinstance(comment, dict):
-            return Comment(comment)
-        return None
+        return Comment(comment)
 
     @_auth_required
     def create_comment(self, text):
@@ -640,7 +652,9 @@ Leave a comment on a GDPS
             params = param
         )
         if r.status_code >= 400:
-            _raise_for_errors(r)
+            if r.status_code == 404:
+                return list()
+            _raise_for_errors(r, exc_of=(404,))
         comments = r.json().get('data')
         return [Comment(c) for c in comments]
 
@@ -728,7 +742,7 @@ Vote on GDPS
         assert isinstance(vote_type, int), 'vote type must be an integer.'
         assert vote_type, 'vote type must be like or dislike (1 or 2).'
         param = {
-            'type': vote_type
+            'type': vote_type.value if isinstance(vote_type, VoteType) else vote_type
         }
         headers = {
             'content-type': 'application/json',
@@ -772,12 +786,12 @@ def get_account(account_id, /):
     assert isinstance(account_id, int), 'account id must be an integer.'
     assert account_id, 'account id must be positive.'
     r = requests.get(url=f'https://gdps.xyz/api/account/{account_id}/')
-    if r.status_code == 500:
-        raise errors.InternalServerError(r, 'a server side error has occured. Contact developers for help.')
+    if r.status_code >= 400:
+        if r.status_code == 404:
+            return None
+        _raise_for_errors(r, exc_of=(404,))
     account = r.json().get('data')
-    if isinstance(account , dict):
-        return Account(account)
-    return None
+    return Account(account)
 
 
 @_auth_required
@@ -793,10 +807,11 @@ Gives you an authorized account.
     }
     r = requests.get(url=f'https://gdps.xyz/api/account/me/', headers=headers)
     if r.status_code >= 400:
-        _raise_for_errors(r)
+        if r.status_code == 404:
+            return None
+        _raise_for_errors(r, exc_of=(404,))
     me = r.json().get('data')
-    if isinstance(me, dict):
-        return MyAccount(me)
+    return MyAccount(me)
 
 
 # Removed due to captcha
@@ -935,12 +950,12 @@ def get_gdps(gdps_id, /):
     assert isinstance(gdps_id, int), 'GDPS id must be an integer.'
     assert gdps_id, 'GDPS id must be positive.'
     r = requests.get(url=f'https://gdps.xyz/api/gdps/{gdps_id}/')
-    if r.status_code == 500:
-        raise errors.InternalServerError(r, 'a server side error has occured. Contact developers for help.')
+    if r.status_code >= 400:
+        if r.status_code == 404:
+            return None
+        _raise_for_errors(r, exc_of=(404,))
     gdps = r.json().get('data')
-    if isinstance(gdps, dict):
-        return GDPS(gdps)
-    return None
+    return GDPS(gdps)
 
 
 @_auth_required
@@ -1003,7 +1018,9 @@ def search_for_gdps(query, page):
         params = params
     )
     if r.status_code >= 400:
-        _raise_for_errors(r)
+        if r.status_code == 404:
+            return list()
+        _raise_for_errors(r, exc_of=(404,))
     gdps_pagination = r.json().get('data')
     return [GDPS(g) for g in gdps_pagination]
 
@@ -1011,6 +1028,8 @@ def top():
     """Gives you current GDPS Top"""
     r = requests.get(url='https://gdps.xyz/api/gdps/top/')
     if r.status_code >= 400:
-        _raise_for_errors(r)
+        if r.status_code == 404:
+            return list()
+        _raise_for_errors(r, exc_of=(404,))
     top = r.json().get('data')
     return [GDPS(g) for g in top]
