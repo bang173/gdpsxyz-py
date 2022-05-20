@@ -1,5 +1,4 @@
-This lib is not working bc gdps.xyz is dead. Now it's just my small project.
+old gdpsxyz-v4 python API Wrapper
 
 ---
-
-Эта библиотека не работает. Дело в том что gdps.xyz закрыт. Сейчас это просто мой небольшой проект. 
+старый модуль для взаимодействия с gdpsxyz-api-v4
